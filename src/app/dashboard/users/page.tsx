@@ -1,5 +1,7 @@
 'use client';
 
+import { useMemo } from "react";
+import useSWR from "swr";
 import { Users, CheckCircle2, ShieldCheck, Ban } from "lucide-react";
 import { StatCard } from "@/components/stat-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -7,51 +9,73 @@ import { DataTable } from "@/components/data-table";
 import { FilterBar } from "@/components/filter-bar";
 import { StatusBadge } from "@/components/status-badge";
 import { ExportButton } from "@/components/export-button";
+import { getSupabaseClient } from "@/lib/supabase";
+import type { User } from "@/lib/types";
 
-const users = [
-  {
-    id: "u1",
-    name: "Nadia Rahma",
-    email: "nadia@ui.ac.id",
-    university: "Universitas Indonesia",
-    role: "requester",
-    isVerified: true,
-    isActive: true,
-    createdAt: "2025-01-03",
-  },
-  {
-    id: "u2",
-    name: "Rizky Pratama",
-    email: "rizky@itb.ac.id",
-    university: "Institut Teknologi Bandung",
-    role: "runner",
-    isVerified: true,
-    isActive: true,
-    createdAt: "2025-01-08",
-  },
-  {
-    id: "u3",
-    name: "Putri Lestari",
-    email: "putri@ugm.ac.id",
-    university: "Universitas Gadjah Mada",
-    role: "both",
-    isVerified: false,
-    isActive: true,
-    createdAt: "2025-01-15",
-  },
-  {
-    id: "u4",
-    name: "Andi Kurniawan",
-    email: "andi@binus.ac.id",
-    university: "Binus University",
-    role: "requester",
-    isVerified: true,
-    isActive: false,
-    createdAt: "2025-01-21",
-  },
-];
+type DashboardUserRow = {
+  id: string;
+  name: string;
+  email: string;
+  university: string;
+  role: string;
+  isVerified: boolean;
+  isActive: boolean;
+  createdAt: string;
+};
+
+type UserWithUniversity = User & {
+  university?: { name?: string | null }[] | null;
+};
 
 export default function UsersPage() {
+  const supabase = useMemo(() => getSupabaseClient(), []);
+
+  const {
+    data: users,
+    error,
+    isLoading,
+  } = useSWR<DashboardUserRow[]>("dashboard-users", async () => {
+    const { data, error } = await supabase
+      .from("users")
+      .select(
+        `
+        id,
+        full_name,
+        email,
+        role,
+        is_active,
+        is_verified,
+        created_at,
+        university:universities(name)
+      `
+      )
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      throw error;
+    }
+
+    const typedRows = (data ?? []) as unknown as UserWithUniversity[];
+
+    return typedRows.map((row) => {
+      const universityName =
+        Array.isArray(row.university) &&
+        typeof row.university[0]?.name === "string"
+          ? row.university[0]!.name!
+          : "-";
+
+      return {
+        id: row.id,
+        name: row.full_name,
+        email: row.email,
+        university: universityName,
+        role: row.role,
+        isVerified: Boolean(row.is_verified ?? false),
+        isActive: Boolean(row.is_active),
+        createdAt: row.created_at,
+      };
+    });
+  });
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -120,16 +144,18 @@ export default function UsersPage() {
           <CardTitle className="text-sm">Daftar User</CardTitle>
           <ExportButton
             filename="users.csv"
-            rows={users.map((user) => ({
-              id: user.id,
-              name: user.name,
-              email: user.email,
-              university: user.university,
-              role: user.role,
-              is_verified: user.isVerified,
-              is_active: user.isActive,
-              created_at: user.createdAt,
-            }))}
+            rows={
+              users?.map((user) => ({
+                id: user.id,
+                name: user.name,
+                email: user.email,
+                university: user.university,
+                role: user.role,
+                is_verified: user.isVerified,
+                is_active: user.isActive,
+                created_at: user.createdAt,
+              })) ?? []
+            }
           />
         </CardHeader>
         <CardContent>
@@ -195,10 +221,25 @@ export default function UsersPage() {
                 sortable: true,
               },
             ]}
-            data={users}
+            data={users ?? []}
             searchPlaceholder="Cari nama atau email..."
             pageSize={10}
           />
+          {isLoading && (
+            <p className="mt-3 text-xs text-slate-400">
+              Memuat data user dari Supabase...
+            </p>
+          )}
+          {error && (
+            <p className="mt-3 text-xs text-rose-300">
+              Gagal memuat data user: {error.message}
+            </p>
+          )}
+          {!isLoading && !error && users && users.length === 0 && (
+            <p className="mt-3 text-xs text-slate-400">
+              Belum ada data user di Supabase.
+            </p>
+          )}
         </CardContent>
       </Card>
     </div>

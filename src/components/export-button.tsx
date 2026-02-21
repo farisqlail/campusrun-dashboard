@@ -46,7 +46,7 @@ export function ExportButton({ filename, rows }: ExportButtonProps) {
   return (
     <Button
       type="button"
-      className="flex h-9 items-center gap-2 bg-slate-900 px-3 text-xs text-slate-100 hover:bg-slate-800"
+      className="flex h-9 items-center gap-2 bg-slate-900 px-3 text-xs text-white hover:bg-slate-800"
       onClick={handleExport}
       disabled={!rows.length}
     >

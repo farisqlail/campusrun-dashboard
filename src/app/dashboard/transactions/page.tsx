@@ -1,5 +1,7 @@
-'use client';
+"use client";
 
+import { useMemo } from "react";
+import useSWR from "swr";
 import { Receipt, ArrowDownCircle, ArrowUpCircle } from "lucide-react";
 import { StatCard } from "@/components/stat-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -7,9 +9,10 @@ import { DataTable } from "@/components/data-table";
 import { FilterBar } from "@/components/filter-bar";
 import { StatusBadge } from "@/components/status-badge";
 import { ExportButton } from "@/components/export-button";
-import type { TransactionStatus } from "@/lib/types";
+import { getSupabaseClient } from "@/lib/supabase";
+import type { Transaction, TransactionStatus } from "@/lib/types";
 
-const transactions: Array<{
+type DashboardTransactionRow = {
   id: string;
   code: string;
   orderCode: string;
@@ -19,41 +22,12 @@ const transactions: Array<{
   amount: number;
   status: TransactionStatus;
   createdAt: string;
-}> = [
-  {
-    id: "t1",
-    code: "TRX-2025-0001",
-    orderCode: "CR-2025-0018",
-    user: "Nadia Rahma",
-    type: "topup",
-    method: "midtrans",
-    amount: 100000,
-    status: "paid",
-    createdAt: "2025-02-18 09:50",
-  },
-  {
-    id: "t2",
-    code: "TRX-2025-0002",
-    orderCode: "CR-2025-0019",
-    user: "Bima Setiawan",
-    type: "order_payment",
-    method: "xendit",
-    amount: 26000,
-    status: "pending",
-    createdAt: "2025-02-18 10:01",
-  },
-  {
-    id: "t3",
-    code: "TRX-2025-0003",
-    orderCode: "CR-2025-0020",
-    user: "Andi Kurniawan",
-    type: "order_payment",
-    method: "ovo",
-    amount: 35000,
-    status: "failed",
-    createdAt: "2025-02-18 10:05",
-  },
-];
+};
+
+type TransactionWithJoins = Transaction & {
+  order?: { order_code?: string | null } | null;
+  user?: { full_name?: string | null } | null;
+};
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("id-ID", {
@@ -64,6 +38,93 @@ function formatCurrency(value: number) {
 }
 
 export default function TransactionsPage() {
+  const supabase = useMemo(() => getSupabaseClient(), []);
+
+  const {
+    data: transactions,
+    error,
+    isLoading,
+  } = useSWR<DashboardTransactionRow[]>("dashboard-transactions", async () => {
+    const { data, error } = await supabase
+      .from("transactions")
+      .select(
+        `
+        id,
+        order_id,
+        user_id,
+        transaction_code,
+        payment_method,
+        payment_gateway,
+        amount,
+        status,
+        created_at,
+        order:orders(order_code),
+        user:users(full_name)
+      `
+      )
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      throw error;
+    }
+
+    const typedRows = (data ?? []) as unknown as TransactionWithJoins[];
+
+    return typedRows.map((row) => {
+      const hasOrder = Boolean(row.order_id);
+      const status = row.status;
+
+      let type: string;
+      if (status === "refunded") {
+        type = "refund";
+      } else {
+        type = hasOrder ? "order_payment" : "topup";
+      }
+
+      const method =
+        row.payment_method ?? row.payment_gateway ?? "unknown";
+
+      const orderCode =
+        row.order && typeof row.order.order_code === "string"
+          ? row.order.order_code
+          : "-";
+
+      const userName =
+        row.user && typeof row.user.full_name === "string"
+          ? row.user.full_name
+          : "-";
+
+      return {
+        id: row.id,
+        code: row.transaction_code ?? "-",
+        orderCode,
+        user: userName,
+        type,
+        method,
+        amount: row.amount,
+        status: row.status,
+        createdAt: row.created_at,
+      };
+    });
+  });
+
+  const totalVolume =
+    transactions?.reduce((sum, trx) => sum + trx.amount, 0) ?? 0;
+
+  const totalTopupPaid =
+    transactions?.filter(
+      (trx) => trx.type === "topup" && trx.status === "paid"
+    ).length ?? 0;
+
+  const totalRefundFailed =
+    transactions?.filter(
+      (trx) => trx.status === "failed" || trx.status === "refunded"
+    ).length ?? 0;
+
+  const totalVolumeLabel = formatCurrency(totalVolume);
+  const totalTopupPaidLabel = totalTopupPaid.toLocaleString("id-ID");
+  const totalRefundFailedLabel = totalRefundFailed.toLocaleString("id-ID");
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -80,21 +141,21 @@ export default function TransactionsPage() {
       <div className="grid gap-4 md:grid-cols-3">
         <StatCard
           title="Volume Transaksi Hari Ini"
-          value={formatCurrency(4350000)}
+          value={totalVolumeLabel}
           helperText="Termasuk top-up dan pembayaran order"
           icon={<Receipt className="h-4 w-4" />}
           accent="emerald"
         />
         <StatCard
           title="Top-up Berhasil"
-          value="124"
+          value={totalTopupPaidLabel}
           helperText="Gateway: Midtrans, Xendit, E-Wallet"
           icon={<ArrowDownCircle className="h-4 w-4" />}
           accent="sky"
         />
         <StatCard
           title="Refund / Failed"
-          value="7"
+          value={totalRefundFailedLabel}
           helperText="Perlu cek lebih lanjut"
           icon={<ArrowUpCircle className="h-4 w-4" />}
           accent="amber"
@@ -129,17 +190,19 @@ export default function TransactionsPage() {
           <CardTitle className="text-sm">Daftar Transaksi</CardTitle>
           <ExportButton
             filename="transactions.csv"
-            rows={transactions.map((transaction) => ({
-              id: transaction.id,
-              code: transaction.code,
-              order_code: transaction.orderCode,
-              user: transaction.user,
-              type: transaction.type,
-              method: transaction.method,
-              amount: transaction.amount,
-              status: transaction.status,
-              created_at: transaction.createdAt,
-            }))}
+            rows={
+              transactions?.map((transaction) => ({
+                id: transaction.id,
+                code: transaction.code,
+                order_code: transaction.orderCode,
+                user: transaction.user,
+                type: transaction.type,
+                method: transaction.method,
+                amount: transaction.amount,
+                status: transaction.status,
+                created_at: transaction.createdAt,
+              })) ?? []
+            }
           />
         </CardHeader>
         <CardContent>
@@ -192,10 +255,28 @@ export default function TransactionsPage() {
                 sortable: true,
               },
             ]}
-            data={transactions}
+            data={transactions ?? []}
             searchPlaceholder="Cari kode transaksi atau user..."
             pageSize={10}
           />
+          {isLoading && (
+            <p className="mt-3 text-xs text-slate-400">
+              Memuat data transaksi dari Supabase...
+            </p>
+          )}
+          {error && (
+            <p className="mt-3 text-xs text-rose-300">
+              Gagal memuat data transaksi: {error.message}
+            </p>
+          )}
+          {!isLoading &&
+            !error &&
+            transactions &&
+            transactions.length === 0 && (
+              <p className="mt-3 text-xs text-slate-400">
+                Belum ada data transaksi di Supabase.
+              </p>
+            )}
         </CardContent>
       </Card>
     </div>

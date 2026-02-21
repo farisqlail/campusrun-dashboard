@@ -1,5 +1,7 @@
-'use client';
+"use client";
 
+import { useMemo } from "react";
+import useSWR from "swr";
 import { Wallet, Clock3, CheckCircle2 } from "lucide-react";
 import { StatCard } from "@/components/stat-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -7,9 +9,10 @@ import { DataTable } from "@/components/data-table";
 import { FilterBar } from "@/components/filter-bar";
 import { StatusBadge } from "@/components/status-badge";
 import { ExportButton } from "@/components/export-button";
-import type { DisbursementStatus } from "@/lib/types";
+import { getSupabaseClient } from "@/lib/supabase";
+import type { Disbursement, DisbursementStatus } from "@/lib/types";
 
-const disbursements: Array<{
+type DashboardDisbursementRow = {
   id: string;
   code: string;
   runner: string;
@@ -19,41 +22,11 @@ const disbursements: Array<{
   fee: number;
   status: DisbursementStatus;
   createdAt: string;
-}> = [
-  {
-    id: "d1",
-    code: "DB-2025-0010",
-    runner: "Rizky Pratama",
-    bank: "BCA",
-    accountNumber: "**** 1234",
-    amount: 450000,
-    fee: 4000,
-    status: "pending",
-    createdAt: "2025-02-18 09:10",
-  },
-  {
-    id: "d2",
-    code: "DB-2025-0011",
-    runner: "Nadia Rahma",
-    bank: "Mandiri",
-    accountNumber: "**** 5678",
-    amount: 210000,
-    fee: 4000,
-    status: "processing",
-    createdAt: "2025-02-18 09:05",
-  },
-  {
-    id: "d3",
-    code: "DB-2025-0012",
-    runner: "Bima Setiawan",
-    bank: "BNI",
-    accountNumber: "**** 9876",
-    amount: 165000,
-    fee: 4000,
-    status: "success",
-    createdAt: "2025-02-18 08:55",
-  },
-];
+};
+
+type DisbursementWithRunner = Disbursement & {
+  runner?: { full_name?: string | null } | null;
+};
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("id-ID", {
@@ -64,6 +37,81 @@ function formatCurrency(value: number) {
 }
 
 export default function DisbursementsPage() {
+  const supabase = useMemo(() => getSupabaseClient(), []);
+
+  const {
+    data: disbursements,
+    error,
+    isLoading,
+  } = useSWR<DashboardDisbursementRow[]>(
+    "dashboard-disbursements",
+    async () => {
+      const { data, error } = await supabase
+        .from("disbursements")
+        .select(
+          `
+          id,
+          runner_id,
+          amount,
+          bank_name,
+          account_number,
+          status,
+          created_at,
+          runner:users(full_name)
+        `
+        )
+        .order("created_at", { ascending: false });
+
+      if (error) {
+        throw error;
+      }
+
+      const typedRows = (data ?? []) as unknown as DisbursementWithRunner[];
+
+      return typedRows.map((row) => {
+        const runnerName =
+          row.runner && typeof row.runner.full_name === "string"
+            ? row.runner.full_name
+            : "-";
+
+        const accountNumber =
+          typeof row.account_number === "string" &&
+          row.account_number.length >= 4
+            ? `**** ${row.account_number.slice(-4)}`
+            : row.account_number ?? "-";
+
+        const code = `DB-${row.id.slice(0, 8).toUpperCase()}`;
+
+        return {
+          id: row.id,
+          code,
+          runner: runnerName,
+          bank: row.bank_name,
+          accountNumber,
+          amount: Number(row.amount),
+          fee: 0,
+          status: row.status,
+          createdAt: row.created_at,
+        };
+      });
+    }
+  );
+
+  const totalDisbursement =
+    disbursements?.reduce((sum, item) => sum + item.amount, 0) ?? 0;
+
+  const pendingApprovalCount =
+    disbursements?.filter(
+      (item) => item.status === "pending" || item.status === "processing"
+    ).length ?? 0;
+
+  const successThisMonthCount =
+    disbursements?.filter((item) => item.status === "success").length ?? 0;
+
+  const totalDisbursementLabel = formatCurrency(totalDisbursement);
+  const pendingApprovalLabel = pendingApprovalCount.toLocaleString("id-ID");
+  const successThisMonthLabel = successThisMonthCount.toLocaleString("id-ID");
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -80,22 +128,22 @@ export default function DisbursementsPage() {
       <div className="grid gap-4 md:grid-cols-3">
         <StatCard
           title="Total Pencairan Hari Ini"
-          value={formatCurrency(735000)}
-          helperText="3 disbursement berhasil"
+          value={totalDisbursementLabel}
+          helperText="Total pencairan yang tercatat"
           icon={<Wallet className="h-4 w-4" />}
           accent="emerald"
         />
         <StatCard
           title="Pending Approval"
-          value="6"
+          value={pendingApprovalLabel}
           helperText="Perlu dicek KYC dan aktivitas"
           icon={<Clock3 className="h-4 w-4" />}
           accent="amber"
         />
         <StatCard
           title="Berhasil Bulan Ini"
-          value="124"
-          helperText="Tanpa gagal dari bank"
+          value={successThisMonthLabel}
+          helperText="Pencairan dengan status success"
           icon={<CheckCircle2 className="h-4 w-4" />}
           accent="sky"
         />
@@ -123,17 +171,19 @@ export default function DisbursementsPage() {
           <CardTitle className="text-sm">Daftar Disbursement</CardTitle>
           <ExportButton
             filename="disbursements.csv"
-            rows={disbursements.map((item) => ({
-              id: item.id,
-              code: item.code,
-              runner: item.runner,
-              bank: item.bank,
-              account_number: item.accountNumber,
-              amount: item.amount,
-              fee: item.fee,
-              status: item.status,
-              created_at: item.createdAt,
-            }))}
+            rows={
+              disbursements?.map((item) => ({
+                id: item.id,
+                code: item.code,
+                runner: item.runner,
+                bank: item.bank,
+                account_number: item.accountNumber,
+                amount: item.amount,
+                fee: item.fee,
+                status: item.status,
+                created_at: item.createdAt,
+              })) ?? []
+            }
           />
         </CardHeader>
         <CardContent>
@@ -176,10 +226,28 @@ export default function DisbursementsPage() {
                 sortable: true,
               },
             ]}
-            data={disbursements}
+            data={disbursements ?? []}
             searchPlaceholder="Cari kode pencairan atau nama runner..."
             pageSize={10}
           />
+          {isLoading && (
+            <p className="mt-3 text-xs text-slate-400">
+              Memuat data disbursement dari Supabase...
+            </p>
+          )}
+          {error && (
+            <p className="mt-3 text-xs text-rose-300">
+              Gagal memuat data disbursement: {error.message}
+            </p>
+          )}
+          {!isLoading &&
+            !error &&
+            disbursements &&
+            disbursements.length === 0 && (
+              <p className="mt-3 text-xs text-slate-400">
+                Belum ada data disbursement di Supabase.
+              </p>
+            )}
         </CardContent>
       </Card>
     </div>

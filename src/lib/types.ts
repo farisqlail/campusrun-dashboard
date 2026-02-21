@@ -254,6 +254,16 @@ export interface RunnerStats {
   updated_at: string;
 }
 
+export interface SystemSettings {
+  id: string;
+  platform_name: string;
+  support_email: string;
+  daily_summary_enabled: boolean;
+  report_notification_enabled: boolean;
+  enforce_admin_2fa: boolean;
+  auto_logout_enabled: boolean;
+}
+
 export interface Report {
   id: string;
   reporter_id: string | null;
@@ -267,4 +277,3 @@ export interface Report {
   resolved_by: string | null;
   created_at: string;
 }
-

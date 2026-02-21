@@ -1,5 +1,7 @@
-'use client';
+"use client";
 
+import { useMemo } from "react";
+import useSWR from "swr";
 import { Package, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { StatCard } from "@/components/stat-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -7,53 +9,26 @@ import { DataTable } from "@/components/data-table";
 import { FilterBar } from "@/components/filter-bar";
 import { StatusBadge } from "@/components/status-badge";
 import { ExportButton } from "@/components/export-button";
-import type { OrderStatus } from "@/lib/types";
+import { getSupabaseClient } from "@/lib/supabase";
+import type { Order, OrderStatus, ServiceType } from "@/lib/types";
 
-const orders: Array<{
+type DashboardOrderRow = {
   id: string;
   code: string;
   requester: string;
   runner: string | null;
   university: string;
-  serviceType: string;
+  serviceType: ServiceType | null;
   totalAmount: number;
   status: OrderStatus;
   createdAt: string;
-}> = [
-  {
-    id: "o1",
-    code: "CR-2025-0018",
-    requester: "Nadia Rahma",
-    runner: "Rizky Pratama",
-    university: "UI Depok",
-    serviceType: "food",
-    totalAmount: 48000,
-    status: "completed",
-    createdAt: "2025-02-18 10:12",
-  },
-  {
-    id: "o2",
-    code: "CR-2025-0019",
-    requester: "Bima Setiawan",
-    runner: "Putri Lestari",
-    university: "ITB Ganesha",
-    serviceType: "print",
-    totalAmount: 26000,
-    status: "on_process",
-    createdAt: "2025-02-18 10:09",
-  },
-  {
-    id: "o3",
-    code: "CR-2025-0020",
-    requester: "Andi Kurniawan",
-    runner: null,
-    university: "UGM Bulaksumur",
-    serviceType: "document",
-    totalAmount: 35000,
-    status: "open",
-    createdAt: "2025-02-18 09:51",
-  },
-];
+};
+
+type OrderWithJoins = Order & {
+  requester?: { full_name?: string | null } | null;
+  runner?: { full_name?: string | null } | null;
+  university?: { name?: string | null } | null;
+};
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("id-ID", {
@@ -64,6 +39,95 @@ function formatCurrency(value: number) {
 }
 
 export default function OrdersPage() {
+  const supabase = useMemo(() => getSupabaseClient(), []);
+
+  const {
+    data: orders,
+    error,
+    isLoading,
+  } = useSWR<DashboardOrderRow[]>("dashboard-orders", async () => {
+    const { data, error } = await supabase
+      .from("orders")
+      .select(
+        `
+        id,
+        order_code,
+        requester_id,
+        runner_id,
+        university_id,
+        service_type,
+        total_amount,
+        status,
+        created_at,
+        requester:users!orders_requester_id_fkey(full_name),
+        runner:users!orders_runner_id_fkey(full_name),
+        university:universities(name)
+      `
+      )
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      throw error;
+    }
+
+    const typedRows = (data ?? []) as unknown as OrderWithJoins[];
+
+    return typedRows.map((row) => {
+      const requesterName =
+        row.requester && typeof row.requester.full_name === "string"
+          ? row.requester.full_name
+          : "-";
+
+      const runnerName =
+        row.runner && typeof row.runner.full_name === "string"
+          ? row.runner.full_name
+          : null;
+
+      const universityName =
+        row.university && typeof row.university.name === "string"
+          ? row.university.name
+          : "-";
+
+      return {
+        id: row.id,
+        code: row.order_code,
+        requester: requesterName,
+        runner: runnerName,
+        university: universityName,
+        serviceType: row.service_type,
+        totalAmount: Number(row.total_amount),
+        status: row.status,
+        createdAt: row.created_at,
+      };
+    });
+  });
+
+  const activeOrdersCount =
+    orders?.filter((order) =>
+      ["open", "taken", "on_process"].includes(order.status)
+    ).length ?? 0;
+
+  const problematicOrdersCount =
+    orders?.filter((order) =>
+      ["disputed", "cancelled"].includes(order.status)
+    ).length ?? 0;
+
+  const totalOrders = orders?.length ?? 0;
+  const completedOrdersCount =
+    orders?.filter((order) => order.status === "completed").length ?? 0;
+  const cancelledOrdersCount =
+    orders?.filter((order) => order.status === "cancelled").length ?? 0;
+
+  const completionRate =
+    totalOrders > 0 ? (completedOrdersCount / totalOrders) * 100 : 0;
+
+  const activeOrdersLabel = activeOrdersCount.toLocaleString("id-ID");
+  const problematicOrdersLabel = problematicOrdersCount.toLocaleString("id-ID");
+  const completionRateLabel = `${completionRate.toLocaleString("id-ID", {
+    maximumFractionDigits: 1,
+  })}%`;
+  const cancelledOrdersLabel = cancelledOrdersCount.toLocaleString("id-ID");
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -81,7 +145,7 @@ export default function OrdersPage() {
         <StatCard
           title="Order Aktif"
           description="Open • Taken • On process"
-          value="32"
+          value={activeOrdersLabel}
           helperText="SLA median: 18 menit"
           icon={<Package className="h-4 w-4" />}
           accent="sky"
@@ -89,7 +153,7 @@ export default function OrdersPage() {
         <StatCard
           title="Order Bermasalah"
           description="Dispute dan berisiko gagal"
-          value="4"
+          value={problematicOrdersLabel}
           helperText="Perlu eskalasi support"
           icon={<AlertTriangle className="h-4 w-4" />}
           accent="amber"
@@ -97,8 +161,8 @@ export default function OrdersPage() {
         <StatCard
           title="Completion Rate"
           description="Order terselesaikan"
-          value="93,4%"
-          helperText="Cancel hari ini: 7 order"
+          value={completionRateLabel}
+          helperText={`Cancel hari ini: ${cancelledOrdersLabel} order`}
           icon={<CheckCircle2 className="h-4 w-4" />}
           accent="emerald"
         />
@@ -136,17 +200,19 @@ export default function OrdersPage() {
           <CardTitle className="text-sm">Daftar Order</CardTitle>
           <ExportButton
             filename="orders.csv"
-            rows={orders.map((order) => ({
-              id: order.id,
-              code: order.code,
-              requester: order.requester,
-              runner: order.runner,
-              university: order.university,
-              service_type: order.serviceType,
-              total_amount: order.totalAmount,
-              status: order.status,
-              created_at: order.createdAt,
-            }))}
+            rows={
+              orders?.map((order) => ({
+                id: order.id,
+                code: order.code,
+                requester: order.requester,
+                runner: order.runner,
+                university: order.university,
+                service_type: order.serviceType,
+                total_amount: order.totalAmount,
+                status: order.status,
+                created_at: order.createdAt,
+              })) ?? []
+            }
           />
         </CardHeader>
         <CardContent>
@@ -195,10 +261,25 @@ export default function OrdersPage() {
                 sortable: true,
               },
             ]}
-            data={orders}
+            data={orders ?? []}
             searchPlaceholder="Cari kode order atau nama requester..."
             pageSize={10}
           />
+          {isLoading && (
+            <p className="mt-3 text-xs text-slate-400">
+              Memuat data order dari Supabase...
+            </p>
+          )}
+          {error && (
+            <p className="mt-3 text-xs text-rose-300">
+              Gagal memuat data order: {error.message}
+            </p>
+          )}
+          {!isLoading && !error && orders && orders.length === 0 && (
+            <p className="mt-3 text-xs text-slate-400">
+              Belum ada data order di Supabase.
+            </p>
+          )}
         </CardContent>
       </Card>
     </div>

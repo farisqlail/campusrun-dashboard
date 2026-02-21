@@ -15,35 +15,29 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import { getSupabaseClient } from "@/lib/supabase";
+import type { University } from "@/lib/types";
 
-const sampleUniversities = [
-  {
-    name: "Universitas Indonesia",
-    city: "Depok",
-    province: "Jawa Barat",
-    isActive: true,
-    totalUsers: 820,
-    totalOrders: 1420,
-  },
-  {
-    name: "Institut Teknologi Bandung",
-    city: "Bandung",
-    province: "Jawa Barat",
-    isActive: true,
-    totalUsers: 640,
-    totalOrders: 1180,
-  },
-  {
-    name: "Universitas Gadjah Mada",
-    city: "Yogyakarta",
-    province: "DI Yogyakarta",
-    isActive: false,
-    totalUsers: 0,
-    totalOrders: 0,
-  },
-];
+export default async function UniversitiesPage() {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("universities")
+    .select("id, name, city, province, is_active, total_users")
+    .order("name", { ascending: true });
 
-export default function UniversitiesPage() {
+  const universities = (data ?? []) as Array<
+    Pick<
+      University,
+      "id" | "name" | "city" | "province" | "is_active" | "total_users"
+    >
+  >;
+
+  const totalUniversities = universities.length;
+  const activeUniversities = universities.filter(
+    (univ) => univ.is_active
+  ).length;
+  const coveredCities = new Set(universities.map((univ) => univ.city)).size;
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -75,9 +69,11 @@ export default function UniversitiesPage() {
             </div>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-semibold text-slate-50">24</div>
+            <div className="text-2xl font-semibold text-slate-50">
+              {totalUniversities}
+            </div>
             <div className="text-xs text-slate-400">
-              12 universitas sudah aktif
+              {activeUniversities} universitas sudah aktif
             </div>
           </CardContent>
         </Card>
@@ -95,7 +91,9 @@ export default function UniversitiesPage() {
             </div>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-semibold text-slate-50">10</div>
+            <div className="text-2xl font-semibold text-slate-50">
+              {coveredCities}
+            </div>
             <div className="text-xs text-slate-400">
               Fokus awal: Jabodetabek, Bandung, Jogja
             </div>
@@ -115,9 +113,11 @@ export default function UniversitiesPage() {
             </div>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-semibold text-slate-50">12</div>
+            <div className="text-2xl font-semibold text-slate-50">
+              {activeUniversities}
+            </div>
             <div className="text-xs text-slate-400">
-              3 kampus menunggu verifikasi kerjasama
+              {totalUniversities - activeUniversities} kampus menunggu aktivasi
             </div>
           </CardContent>
         </Card>
@@ -125,10 +125,9 @@ export default function UniversitiesPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Sample Data Universitas</CardTitle>
+          <CardTitle>Data Universitas</CardTitle>
           <CardDescription>
-            Nantinya diambil dari tabel universities dan dihubungkan ke orders
-            dan users.
+            Diambil langsung dari tabel universities di Supabase.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -141,19 +140,18 @@ export default function UniversitiesPage() {
                   <TableHead>Provinsi</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Pengguna</TableHead>
-                  <TableHead>Total Order</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {sampleUniversities.map((univ) => (
-                  <TableRow key={univ.name}>
+                {universities.map((univ) => (
+                  <TableRow key={univ.id}>
                     <TableCell className="font-medium text-slate-50">
                       {univ.name}
                     </TableCell>
                     <TableCell>{univ.city}</TableCell>
                     <TableCell>{univ.province}</TableCell>
                     <TableCell>
-                      {univ.isActive ? (
+                      {univ.is_active ? (
                         <Badge className="bg-emerald-500/10 text-emerald-300">
                           Aktif
                         </Badge>
@@ -163,16 +161,29 @@ export default function UniversitiesPage() {
                         </Badge>
                       )}
                     </TableCell>
-                    <TableCell>{univ.totalUsers}</TableCell>
-                    <TableCell>{univ.totalOrders}</TableCell>
+                    <TableCell>{univ.total_users}</TableCell>
                   </TableRow>
                 ))}
+                {universities.length === 0 && !error && (
+                  <TableRow>
+                    <TableCell
+                      colSpan={5}
+                      className="text-xs text-slate-400"
+                    >
+                      Belum ada data universitas di Supabase.
+                    </TableCell>
+                  </TableRow>
+                )}
               </TableBody>
             </Table>
+            {error && (
+              <p className="mt-3 text-xs text-rose-300">
+                Gagal memuat data universitas: {error.message}
+              </p>
+            )}
           </div>
         </CardContent>
       </Card>
     </div>
   );
 }
-
