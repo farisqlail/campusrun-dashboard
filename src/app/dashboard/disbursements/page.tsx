@@ -1,3 +1,5 @@
+'use client';
+
 import { Wallet, Clock3, CheckCircle2 } from "lucide-react";
 import { StatCard } from "@/components/stat-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";

@@ -1,3 +1,5 @@
+'use client';
+
 import { Users, CheckCircle2, ShieldCheck, Ban } from "lucide-react";
 import { StatCard } from "@/components/stat-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -202,4 +204,3 @@ export default function UsersPage() {
     </div>
   );
 }
-

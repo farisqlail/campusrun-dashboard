@@ -1,3 +1,5 @@
+'use client';
+
 import { Percent, Users, Rocket } from "lucide-react";
 import { StatCard } from "@/components/stat-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -159,4 +161,3 @@ export default function PromotionsPage() {
     </div>
   );
 }
-

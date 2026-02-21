@@ -1,3 +1,5 @@
+'use client';
+
 import { Package, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { StatCard } from "@/components/stat-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
